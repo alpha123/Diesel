@@ -119,108 +119,27 @@ return {
         return func;
     },
     
+    getComputedStyle: function (elem, prop) {
+        if (elem.currentStyle)
+            return elem.currentStyle[prop];
+        return document.defaultView.getComputedStyle(elem, null).getPropertyValue(prop);
+    },
+    
     ajax: function (options) {
-        options = options || {};
-        var url = options.url || '', method = options.method || 'POST', data = options.data || {}, rawData, headers,
-        successHandlers = options.success ? [options.success] : [], errorHandlers = options.error ? [options.error] : [],
-        states = {1: [], 2: [], 3: [], 4: []}, statuses = {},
-        dsl = {
-            url: function (newUrl) {
-                url = newUrl;
-                return dsl;
-            },
-            
-            method: function (newMethod) {
-                method = newMethod.toUpperCase();
-                return dsl;
-            },
-            
-            raw: function (newData) {
-                rawData = newData;
-                return dsl;
-            },
-            
-            data: function (newData) {
-                Diesel.merge(data, newData);
-                return dsl;
-            },
-            
-            headers: function (newHeaders) {
-                Diesel.merge(headers, newHeaders);
-                return dsl;
-            },
-            
-            success: function (handler) {
-                successHandlers.push(handler);
-                return dsl;
-            },
-            
-            error: function (handler) {
-                errorHandlers.push(handler);
-                return dsl;
-            },
-            
-            state: function (state, handler) {
-                if (handler) {
-                    states[state] = states[state] || [];
-                    states[state].push(handler);
-                }
-                else {
-                    states[1].push(state); // "state" is actually the handler
-                    states[2].push(state);
-                    states[3].push(state);
-                    states[4].push(state);
-                }
-                return dsl;
-            },
-            
-            status: function (code, handler) {
-                statuses[code] = statuses[code] || [];
-                statuses[code].push(handler);
-                return dsl;
-            },
-            
-            send: function () {
-                var request = new XMLHttpRequest(), // I don't support IE6 :-)
-                query = Diesel.objectToQueryString(data),
-                get = method == 'GET', i;
-                request.open(get ? 'GET' : 'POST', get ? [url, query].join('?') : url, true);
-                if (!get)
-                    request.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
-                for (i in headers) {
-                    if (headers.hasOwnProperty(i))
-                        request.setRequestHeader(i, headers[i]);
-                }
-                request.onreadystatechange = function () {
-                    var stateHandlers = states[request.readyState], statusHandlers, i = 0, l;
-                    if (stateHandlers) {
-                        for (l = stateHandlers.length; i < l; ++i)
-                            stateHandlers[i](request);
-                    }
-                    if (request.readyState != 4)
-                        return;
-                    statusHandlers = statuses[request.status];
-                    if (statusHandlers) {
-                        for (i = 0, l = statusHandlers.length; i < l; ++i)
-                            statusHandlers[i](request);
-                    }
-                    if (request.status == 200) {
-                        for (i = 0, l = successHandlers.length; i < l; ++i)
-                            successHandlers[i](request);
-                    }
-                    else {
-                        for (i = 0, l = errorHandlers.length; i < l; ++i)
-                            errorHandlers[i](request);
-                    }
-                };
-                request.send(get ? null : rawData || query);
-            }
-        };
-        return dsl;
+        
     },
     
     conflict: function () {
-        window.$ = Diesel.get;
+        var w = window;
+        Diesel._oldDollar = w.$;
+        w.$ = Diesel.get;
+        Diesel.merge(w.$, Diesel);
+        return w.$;
+    },
+    
+    unconflict: function () {
+        window.$ = Diesel._oldDollar;
+        return Diesel;
     }
 };
 
@@ -345,6 +264,7 @@ return {
     },
     
     animate: function (list) {
+        Diesel.DSL.style.properties = Diesel.DSL.style.properties || stylestr;
         var sty = list.head().style, styprops = Diesel.DSL.style.properties.split('|'),
         pl = styprops.length, dsl = list, props = {}, i;
         function makeAnimFunc(prop) {
@@ -422,9 +342,9 @@ return {
                     if (props.hasOwnProperty(i)) {
                         prop = props[i];
                         if (prop.from)
-                            elem.style[prop] = prop.from;
+                            elem.style[i] = prop.from;
                         else
-                            prop.from = elem.style[prop];
+                            prop.from = Diesel.getComputedStyle(elem, i);
                         if (!prop.to)
                             prop.to = elem.style[prop];
                         (function (prop, vars) {
@@ -614,7 +534,7 @@ cons = function (obj, list) {
 },
 
 L = function (head, tail) {
-    var t = this, reverse, length = 0, ODP = Object.defineProperties;
+    var t = this, reverse, length = 0, cache = [], ODP = Object.defineProperties;
     t.head = function () {
         return head;
     };
@@ -639,8 +559,10 @@ L = function (head, tail) {
         return reverse;
     };
     t.get = function (index) {
+        if (typeof cache[index] != 'undefined')
+            return cache[index];
         for (var s = t, i = index; i > 0 && s.tail(); s = s.tail(), --i);
-        return s.head();
+        return cache[index] = s.head();
     };
     t.append = function () {
         for (var list = t.reverse(), args = arguments, i = 0; i < args.length; ++i)
@@ -827,8 +749,6 @@ List.make = function (object, num) {
 List.from = function (object) {
     for (var list = Nil, i = object.length; --i >= 0;)
         list = cons(object[i], list);
-    //for (i = list.len(); --i >= 0;)
-    //    list[i] = list.get(i);
     return list;
 };
 
@@ -844,21 +764,24 @@ return List;
 
 Diesel.NodeList = (function () {
 
-var wrapPlugin = function (func, list) {
+function wrapPlugin(func, list) {
     return function () {
         var args = [].slice.call(arguments);
-        list.forEach(function (elem) { func.apply(Diesel, [elem].concat(args)); });
+        args.unshift(null);
+        list.forEach(function (elem) { args.shift(); args.unshift(elem); func.apply(Diesel, args); });
         return list;
     };
-},
+}
 
-wrapDsl = function (func, list) {
+function wrapDsl(func, list) {
     return function () {
-        return func.apply(Diesel, [list].concat([].slice.call(arguments)));
+        var args = [].slice.call(arguments);
+        args.unshift(list);
+        return func.apply(Diesel, args);
     };
-},
+}
 
-NodeList = function (list) {
+return function (list) {
     var t = this;
     Diesel.merge(t, list, function (f) {
         if (typeof f == 'function') {
@@ -876,8 +799,6 @@ NodeList = function (list) {
     Diesel.merge(t, Diesel.plugins, function (f) { return wrapPlugin(f, t); });
     Diesel.merge(t, Diesel.DSL, function (f) { return wrapDsl(f, t); });
 };
-
-return NodeList;
 
 })();
 
