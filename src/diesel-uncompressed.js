@@ -15,10 +15,12 @@ return {
     },
     
     merge: function (obj1, obj2, func) {
+        func = func || function (f) { return f; };
         for (var i in obj2) {
             if (obj2.hasOwnProperty(i))
-                obj1[i] = func ? func(obj2[i], i) : obj2[i];
+                obj1[i] = func(obj2[i], i);
         }
+        return obj1;
     },
     
     objectToQueryString: function (obj) {
@@ -94,7 +96,6 @@ return {
     th: createElemCreator('th'),
     
     addEvent: function (elem, event, func) {
-        event = 'on' + event;
         var evt = elem[event], old = evt;
         if (!evt || !evt.handlers) {
             evt = elem[event] = function (e) {
@@ -108,7 +109,6 @@ return {
     },
     
     removeEvent: function(elem, event, func) {
-        event = 'on' + event;
         var handlers;
         if (elem[event] && (handlers = elem[event].handlers)) {
             for (var i = 0, l = handlers.length; i < l; ++i) {
@@ -127,101 +127,98 @@ return {
     
     ajax: function (options) {
         options = options || {};
-        var url = options.url || '', method = options.method || 'POST', data = options.data || {}, rawData, headers,
-        successHandlers = options.success ? [options.success] : [], errorHandlers = options.error ? [options.error] : [],
-        states = {1: [], 2: [], 3: [], 4: []}, statuses = {},
+        var request = new XMLHttpRequest(), // I don't support IE 6 :-)
+        successHandlers = [], errorHandlers = [], stateChangeHandlers = {1: [], 2: [], 3: [], 4: []},
+        completeHandlers = {},
         dsl = {
-            url: function (newUrl) {
-                url = newUrl;
-                return dsl;
-            },
-            
-            method: function (newMethod) {
-                method = newMethod.toUpperCase();
-                return dsl;
-            },
-            
-            raw: function (newData) {
-                rawData = newData;
-                return dsl;
-            },
-            
-            data: function (newData) {
-                Diesel.merge(data, newData);
-                return dsl;
-            },
-            
-            headers: function (newHeaders) {
-                Diesel.merge(headers, newHeaders);
-                return dsl;
-            },
-            
-            success: function (handler) {
-                successHandlers.push(handler);
-                return dsl;
-            },
-            
-            error: function (handler) {
-                errorHandlers.push(handler);
-                return dsl;
-            },
-            
-            state: function (state, handler) {
-                if (handler) {
-                    states[state] = states[state] || [];
-                    states[state].push(handler);
-                }
-                else {
-                    states[1].push(state); // "state" is actually the handler
-                    states[2].push(state);
-                    states[3].push(state);
-                    states[4].push(state);
-                }
-                return dsl;
-            },
-            
-            status: function (code, handler) {
-                statuses[code] = statuses[code] || [];
-                statuses[code].push(handler);
-                return dsl;
-            },
-            
-            send: function () {
-                var request = new XMLHttpRequest(), // I don't support IE6 :-)
-                query = Diesel.objectToQueryString(data),
-                get = method == 'GET', i;
-                request.open(get ? 'GET' : 'POST', get ? [url, query].join('?') : url, true);
-                if (!get)
-                    request.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
-                for (i in headers) {
-                    if (headers.hasOwnProperty(i))
-                        request.setRequestHeader(i, headers[i]);
-                }
-                request.onreadystatechange = function () {
-                    var stateHandlers = states[request.readyState], statusHandlers, i = 0, l;
-                    if (stateHandlers) {
-                        for (l = stateHandlers.length; i < l; ++i)
-                            stateHandlers[i](request);
+            on: function () {
+                var orsc = 'onreadystatechange';
+                return Diesel.merge(dsl, {
+                    success: function (handler) {
+                        successHandlers.push(handler);
+                        return dsl;
+                    },
+                    
+                    error: function (handler) {
+                        errorHandlers.push(handler);
+                        return dsl;
+                    },
+                    
+                    stateChange: function (state, handler) {
+                        if (handler && !stateChangeHandlers[state])
+                            stateChangeHandlers[state] = [];
+                        if (handler)
+                            stateChangeHandlers[state].push(handler);
+                        else {
+                            stateChangeHandlers[1].push(state); // "state" is actually the handler
+                            stateChangeHandlers[2].push(state);
+                            stateChangeHandlers[3].push(state);
+                            stateChangeHandlers[4].push(state);
+                        }
+                        return dsl;
+                    },
+                    
+                    complete: function (status, handler) {
+                        if (handler && !completeHandlers[status])
+                            completeHandlers[status] = [];
+                        if (handler)
+                            completeHandlers[status].push(handler);
+                        else {
+                            successHandlers.push(status);
+                            errorHandlers.push(status);
+                        }
+                        return dsl;
                     }
-                    if (request.readyState != 4)
-                        return;
-                    statusHandlers = statuses[request.status];
-                    if (statusHandlers) {
-                        for (i = 0, l = statusHandlers.length; i < l; ++i)
-                            statusHandlers[i](request);
-                    }
-                    if (request.status == 200) {
-                        for (i = 0, l = successHandlers.length; i < l; ++i)
-                            successHandlers[i](request);
-                    }
-                    else {
-                        for (i = 0, l = errorHandlers.length; i < l; ++i)
-                            errorHandlers[i](request);
+                });
+            },
+            
+            post: function (data) {
+                return {
+                    to: function (url) {
+                        alert('sending');
+                        request.open('POST', url, true);
+                        request.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
+                        addReadyStateChange();
+                        request.send(typeof data == 'string' ? data : Diesel.objectToQueryString(data));
                     }
                 };
-                request.send(get ? null : rawData || query);
+            },
+            
+            get: function (data) {
+                return {
+                    from: function (url) {
+                        request.open('GET', [url, typeof data == 'string' ? data :
+                        Diesel.objectToQueryString(data)].join('?'), true);
+                        addReadyStateChange();
+                        request.send(null);
+                    }
+                };
             }
         };
+        function addReadyStateChange() {
+            request.onreadystatechange = function () {
+                var stateHandlers = stateChangeHandlers[request.readyState], statusHandlers, i = 0, l;
+                if (stateHandlers) {
+                    for (l = stateHandlers.length; i < l; ++i)
+                        stateHandlers[i](request);
+                }
+                if (request.readyState != 4)
+                    return;
+                statusHandlers = completeHandlers[request.status];
+                if (statusHandlers) {
+                    for (i = 0, l = statusHandlers.length; i < l; ++i)
+                        statusHandlers[i](request);
+                }
+                if (request.status == 200) {
+                    for (i = 0, l = successHandlers.length; i < l; ++i)
+                        successHandlers[i](request);
+                }
+                else {
+                    for (i = 0, l = errorHandlers.length; i < l; ++i)
+                        errorHandlers[i](request);
+                }
+            };
+        }
         return dsl;
     },
     
@@ -288,18 +285,19 @@ function makeEventDsl(evtFunc) {
             list.forEach(function (elem) {
                 for (var j in events) {
                     if (events.hasOwnProperty(j))
-                        evtFunc(elem, j, events[j]);
+                        evtFunc(elem, 'on' + j, events[j]);
                 }
             });
             return list;
         }
         function makeEventFunc(event) {
+            event = 'on' + event;
             return function (func) {
                 list.forEach(function (elem) { evtFunc(elem, event, func); });
                 return dsl;
             };
         }
-        var dsl = Diesel.extend(list, {
+        var dsl = Diesel.merge(list, {
             click: makeEventFunc('click'),
             focus: makeEventFunc('focus'),
             blur: makeEventFunc('blur'),
@@ -308,7 +306,7 @@ function makeEventDsl(evtFunc) {
                     list.forEach(function (elem) {
                         for (var j in mevents) {
                             if (mevents.hasOwnProperty(j))
-                                evtFunc(elem, 'mouse' + j, mevents[j]);
+                                evtFunc(elem, 'onmouse' + j, mevents[j]);
                         }
                     });
                     return dsl;
@@ -316,7 +314,7 @@ function makeEventDsl(evtFunc) {
                 return mouseDsl;
             }
         }),
-        mouseDsl = Diesel.extend(dsl, {
+        mouseDsl = Diesel.merge(dsl, {
             move: makeEventFunc('mousemove'),
             over: makeEventFunc('mouseover'),
             out: makeEventFunc('mouseout')
@@ -365,38 +363,36 @@ return {
         pl = styprops.length, dsl = list, props = {}, i;
         function makeAnimFunc(prop) {
             return function () {
-                var propobj = {duration: 300, updateHandlers: [], finishHandlers: []}, adsl;
+                var propobj = {duration: 300, updateHandlers: [], finishHandlers: []};
                 props[prop] = propobj;
-                adsl = Diesel.extend(dsl, {
+                return Diesel.merge(dsl, {
                     from: function (value) {
                         propobj.from = '' + value;
-                        return adsl;
+                        return dsl;
                     },
                     
                     to: function (value) {
                         propobj.to = '' + value;
-                        return adsl;
+                        return dsl;
                     },
                     
                     over: function (value) {
-                        var odsl = Diesel.extend(adsl, {
+                        return Diesel.merge(dsl, {
                             ms: function () {
                                 propobj.duration = value;
-                                return odsl;
+                                return dsl;
                             },
                             
                             s: function (secs) {
                                 propobj.duration = value * 1000;
-                                return odsl;
+                                return dsl;
                             }
                         });
-                        return odsl;
                     },
                     
                     on: function (events) {
-                        var edsl, i;
                         if (events) {
-                            for (i in events) {
+                            for (var i in events) {
                                 if (events.hasOwnProperty(i)) {
                                     if (i == 'finish')
                                         propobj.finishHandlers.push(events[i]);
@@ -404,23 +400,21 @@ return {
                                         propobj.updateHandlers.push(events[i]);
                                 }
                             }
-                            return adsl;
+                            return dsl;
                         }
-                        edsl = Diesel.extend(adsl, {
+                        return Diesel.merge(dsl, {
                             finish: function (func) {
                                 propobj.finishHandlers.push(func);
-                                return edsl;
+                                return dsl;
                             },
                             
                             update: function (func) {
                                 propobj.updateHandlers.push(func);
-                                return edsl;
+                                return dsl;
                             }
                         });
-                        return edsl;
                     }
                 });
-                return adsl;
             };
         }
         for (i in sty) {
@@ -485,7 +479,7 @@ return {
     off: makeEventDsl(Diesel.removeEvent),
     
     first: function (list) {
-        return Diesel.extend(list, {       
+        return Diesel.merge(list, {       
             child: function () {
                 return list.child();
             }
@@ -493,7 +487,7 @@ return {
     },
     
     last: function (list) {
-        return Diesel.extend(list, {
+        return Diesel.merge(list, {
             child: function () {
                 return new Diesel.NodeList(list.map(function (elem) {
                     var c = elem.children;
@@ -504,7 +498,7 @@ return {
     },
     
     next: function (list) {
-        return Diesel.extend(list, {
+        return Diesel.merge(list, {
             sibling: function () {
                 return list.sibling();
             }
@@ -512,7 +506,7 @@ return {
     },
     
     previous: function (list) {
-        return Diesel.extend(list, {
+        return Diesel.merge(list, {
             sibling: function () {
                 return list.sibling(-1);
             }
@@ -864,7 +858,7 @@ function wrapPlugin(func, list) {
     return function () {
         var args = [].slice.call(arguments);
         args.unshift(null);
-        list.forEach(function (elem) { args.shift(); args.unshift(elem); func.apply(Diesel, args); });
+        list.forEach(function (elem) { args[0] = elem; func.apply(Diesel, args); });
         return list;
     };
 }
@@ -873,7 +867,7 @@ function wrapDsl(func, list) {
     return function () {
         var args = [].slice.call(arguments);
         args.unshift(list);
-        return func.apply(Diesel, args);
+        return func.apply(list, args);
     };
 }
 
