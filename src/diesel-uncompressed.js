@@ -239,6 +239,18 @@ return {
 })();
 
 Diesel.Engines = {
+    Puma: {
+        priority: 3,
+        
+        test: function () {
+            return !!window.Puma;
+        },
+        
+        search: function (query, node) {
+            return Puma(query, node);
+        }
+    },
+    
     Peppy: {
         priority: 2,
         
