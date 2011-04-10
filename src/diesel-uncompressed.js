@@ -402,6 +402,15 @@ return {
                         });
                     },
                     
+                    increment: function () {
+                        return Diesel.merge(dsl, {
+                            by: function (value) {
+                                propobj.increment = Math.abs(value);
+                                return dsl;
+                            }
+                        });
+                    },
+                    
                     on: function (events) {
                         if (events) {
                             for (var i in events) {
@@ -472,7 +481,7 @@ return {
                                 }
                                 else {
                                     currValue = ~~(currValue + (intify(vars.to) - currValue) * (1 / vars.duration * 10) + .5) +
-                                    (intify(vars.to) > intify(vars.from) ? 1 : -1);
+                                    (vars.increment || 1) * (intify(vars.to) > intify(vars.from) ? 1 : -1);
                                     elem.style[prop] = prefix + currValue / divBy + vars.to.substring(('' + intify(vars.to)).length);
                                     for (l = vars.updateHandlers.length; k < l; ++k)
                                         vars.updateHandlers[i](elem);
@@ -870,7 +879,7 @@ function wrapPlugin(func, list) {
     return function () {
         var args = [].slice.call(arguments);
         args.unshift(null);
-        list.forEach(function (elem) { args[0] = elem; func.apply(Diesel, args); });
+        list.forEach(function (elem) { args[0] = elem; func.apply(list, args); });
         return list;
     };
 }
